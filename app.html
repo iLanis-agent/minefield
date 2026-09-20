@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Minefield</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { font-family:-apple-system,'Segoe UI',Roboto,sans-serif; background:#0e0f1e; color:#ecedff; min-height:100vh; padding:18px 12px 50px; }
+  .wrap { max-width:720px; margin:0 auto; }
+  header { text-align:center; margin-bottom:12px; }
+  header h1 { font-size:25px; }
+  header .tag { color:#7d83c0; font-size:12px; }
+  a { color:#8b7cff; text-decoration:none; }
+  .bar { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; align-items:center; margin-bottom:12px; }
+  .diff { background:#1d2044; border:1px solid #2c3160; color:#aab0e8; border-radius:999px; padding:7px 14px; font-size:12.5px; font-weight:600; cursor:pointer; }
+  .diff.on { background:#8b7cff; color:#0e0f1e; border-color:#8b7cff; }
+  .hud { display:flex; justify-content:center; gap:22px; align-items:center; margin-bottom:10px; font-variant-numeric:tabular-nums; }
+  .hud .cell { text-align:center; }
+  .hud .v { font-size:22px; font-weight:800; }
+  .hud .k { font-size:10px; color:#7d83c0; text-transform:uppercase; letter-spacing:1px; }
+  #face { font-size:26px; cursor:pointer; background:#151730; border:1px solid #252852; border-radius:12px; width:52px; height:52px; line-height:50px; }
+  #boardWrap { display:flex; justify-content:center; }
+  #board { display:grid; gap:2px; background:#1a1c38; padding:6px; border-radius:10px; touch-action:manipulation; user-select:none; }
+  .c { width:34px; height:34px; background:#252a52; border-radius:5px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:16px; cursor:pointer; }
+  .c.open { background:#14162e; cursor:default; }
+  .c.mine { background:#5c2140; }
+  .c.blast { background:#e11d48; }
+  .c.flag { background:#2d3160; }
+  .c.badflag { background:#5c2140; text-decoration:line-through; }
+  .n1{color:#7cc4ff}.n2{color:#5eead4}.n3{color:#fb7185}.n4{color:#c4b5fd}.n5{color:#fbbf24}.n6{color:#67e8f9}.n7{color:#f9a8d4}.n8{color:#e2e8f0}
+  #msg { text-align:center; min-height:22px; margin-top:12px; font-size:14.5px; font-weight:700; }
+  .tools { display:flex; justify-content:center; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:center; }
+  .tools button { background:#1d2044; border:1px solid #2c3160; color:#aab0e8; border-radius:999px; padding:7px 14px; font-size:12.5px; font-weight:600; cursor:pointer; }
+  .tools button.on { background:#8b7cff; color:#0e0f1e; }
+  .note { text-align:center; color:#5b5f96; font-size:11.5px; margin-top:14px; line-height:1.6; }
+  .best { color:#7d83c0; font-size:11.5px; }
+  @media (max-width:520px){ .c{width:30px;height:30px;font-size:14px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>&#128163; Minefield</h1><div class="tag">classic minesweeper - clear every safe tile</div></header>
+  <div class="bar" id="diffs"></div>
+  <div class="hud">
+    <div class="cell"><div class="v" id="minesLeft">10</div><div class="k">mines</div></div>
+    <div id="face" title="new game">&#128578;</div>
+    <div class="cell"><div class="v" id="timer">0</div><div class="k">seconds</div></div>
+  </div>
+  <div id="boardWrap"><div id="board"></div></div>
+  <div id="msg"></div>
+  <div class="tools">
+    <button id="flagMode">&#128681; flag mode: off</button>
+    <span class="best" id="best"></span>
+  </div>
+  <div class="note">Click to reveal - right-click or long-press to flag. Click a revealed number whose flags are placed to open the rest (chord). First click is always safe.<br><a href="index.html">about</a></div>
+</div>
+<script>
+var LEVELS = {
+  easy:   {label:'Easy 9x9', rows:9, cols:9, mines:10},
+  medium: {label:'Medium 16x16', rows:16, cols:16, mines:40},
+  hard:   {label:'Hard 30x16', rows:30, cols:16, mines:99}
+};
+var BEST_KEY='minefield-best-v1', LEVEL_KEY='minefield-level-v1';
+var S = null, timer=null, flagMode=false, lpTimer=null;
+function $(id){return document.getElementById(id);}
+function loadBest(){ try{return JSON.parse(localStorage.getItem(BEST_KEY))||{};}catch(_){return {};} }
+function saveBest(b){ try{localStorage.setItem(BEST_KEY,JSON.stringify(b));}catch(_){}}
+function newGame(levelKey){
+  var lv=LEVELS[levelKey];
+  S={level:levelKey,rows:lv.rows,cols:lv.cols,mines:lv.mines,started:false,over:false,won:false,
+     mine:null,adj:null,revealed:new Set(),flagged:new Set(),t:0};
+  try{localStorage.setItem(LEVEL_KEY,levelKey);}catch(_){}
+  clearInterval(timer); timer=null;
+  $('timer').textContent='0';
+  $('face').innerHTML='&#128578;';
+  $('msg').textContent='';
+  renderDiffs(); renderBoard(); updateHud(); renderBest();
+}
+function renderDiffs(){
+  var s='';
+  for(var k in LEVELS) s+='<button class="diff'+(S.level===k?' on':'')+'" data-k="'+k+'">'+LEVELS[k].label+'</button>';
+  $('diffs').innerHTML=s;
+  document.querySelectorAll('.diff').forEach(function(b){ b.onclick=function(){ newGame(b.dataset.k); }; });
+}
+function renderBest(){
+  var b=loadBest()[S.level];
+  $('best').textContent=b?('best: '+b+'s'):'';
+}
+function cellSize(){
+  var maxW=Math.min(window.innerWidth-36, 720);
+  var w=Math.floor((maxW-12-(S.cols-1)*2)/S.cols);
+  return Math.max(20, Math.min(34, w));
+}
+function renderBoard(){
+  var b=$('board');
+  b.style.gridTemplateColumns='repeat('+S.cols+', 1fr)';
+  var sz=cellSize();
+  b.innerHTML='';
+  for(var i=0;i<S.rows*S.cols;i++){
+    var d=document.createElement('div');
+    d.className='c'; d.dataset.i=i;
+    d.style.width=sz+'px'; d.style.height=sz+'px';
+    b.appendChild(d);
+  }
+  paint();
+}
+function paint(){
+  var cells=$('board').children;
+  for(var i=0;i<cells.length;i++){
+    var d=cells[i];
+    var open=S.revealed.has(i), flag=S.flagged.has(i);
+    d.className='c'+(open?' open':'')+(flag&&!open?' flag':'');
+    d.textContent='';
+    if(open){
+      if(S.mine[i]){ d.classList.add('mine'); d.textContent='\u{1F4A3}'; }
+      else if(S.adj[i]>0){ d.textContent=S.adj[i]; d.classList.add('n'+S.adj[i]); }
+    } else if(flag){ d.textContent='\u{1F6A9}'; }
+  }
+  if(S.over){
+    for(var j=0;j<cells.length;j++){
+      if(!S.won){
+        if(S.mine[j] && !S.flagged.has(j)){ cells[j].classList.add('mine'); cells[j].textContent='\u{1F4A3}'; }
+        if(!S.mine[j] && S.flagged.has(j)){ cells[j].classList.add('badflag'); }
+        if(j===S.blast){ cells[j].classList.add('blast'); }
+      } else if(S.mine[j] && !S.revealed.has(j)){ cells[j].textContent='\u{1F6A9}'; cells[j].classList.add('flag'); }
+    }
+  }
+}
+function updateHud(){ $('minesLeft').textContent=S.mines - S.flagged.size; }
+function startTimer(){
+  timer=setInterval(function(){ S.t++; $('timer').textContent=S.t; },1000);
+}
+function firstClick(i){
+  var r=Math.floor(i/S.cols), c=i%S.cols;
+  var b=makeBoard(S.rows,S.cols,S.mines,r,c);
+  S.mine=b.mine; S.adj=b.adj; S.started=true; startTimer();
+}
+function reveal(i){
+  if(S.over||S.flagged.has(i)||S.revealed.has(i)) return;
+  if(!S.started) firstClick(i);
+  if(S.mine[i]){
+    S.over=true; S.won=false; S.blast=i; S.revealed.add(i);
+    clearInterval(timer);
+    $('face').innerHTML='&#128565;';
+    $('msg').textContent='Boom. Hit the face to try again.';
+    paint(); return;
+  }
+  floodReveal(S, Math.floor(i/S.cols), i%S.cols);
+  checkWin(); paint(); updateHud();
+}
+function toggleFlag(i){
+  if(S.over||S.revealed.has(i)) return;
+  if(S.flagged.has(i)) S.flagged.delete(i); else S.flagged.add(i);
+  paint(); updateHud();
+}
+function chord(i){
+  if(S.over||!S.started) return;
+  var r=Math.floor(i/S.cols), c=i%S.cols;
+  var ch=chordTargets(S,r,c);
+  if(!ch.ok) return;
+  for(var k=0;k<ch.targets.length;k++){
+    var j=ch.targets[k];
+    if(S.mine[j]){ reveal(j); return; }
+  }
+  for(var k2=0;k2<ch.targets.length;k2++) reveal(ch.targets[k2]);
+}
+function checkWin(){
+  if(isWin(S)){
+    S.over=true; S.won=true; clearInterval(timer);
+    $('face').innerHTML='&#128526;';
+    var b=loadBest();
+    if(!b[S.level]||S.t<b[S.level]){ b[S.level]=S.t; saveBest(b); $('msg').textContent='Cleared in '+S.t+'s - new best!'; }
+    else $('msg').textContent='Cleared in '+S.t+'s!';
+    renderBest();
+  }
+}
+$('board').addEventListener('click',function(e){
+  var d=e.target.closest('.c'); if(!d) return;
+  var i=+d.dataset.i;
+  if(flagMode){ toggleFlag(i); return; }
+  if(S.revealed.has(i) && S.adj && S.adj[i]>0) chord(i);
+  else reveal(i);
+});
+$('board').addEventListener('contextmenu',function(e){
+  e.preventDefault();
+  var d=e.target.closest('.c'); if(!d) return;
+  toggleFlag(+d.dataset.i);
+});
+$('board').addEventListener('touchstart',function(e){
+  var d=e.target.closest('.c'); if(!d) return;
+  var i=+d.dataset.i;
+  lpTimer=setTimeout(function(){ toggleFlag(i); lpTimer=null; },450);
+},{passive:true});
+$('board').addEventListener('touchend',function(){ if(lpTimer){clearTimeout(lpTimer);lpTimer=null;} });
+$('board').addEventListener('touchmove',function(){ if(lpTimer){clearTimeout(lpTimer);lpTimer=null;} },{passive:true});
+$('face').onclick=function(){ newGame(S.level); };
+$('flagMode').onclick=function(){
+  flagMode=!flagMode;
+  this.textContent='\u{1F6A9} flag mode: '+(flagMode?'on':'off');
+  this.classList.toggle('on',flagMode);
+};
+window.addEventListener('resize',function(){ if(S) renderBoard(); });
+var startLevel='easy';
+try{ startLevel=localStorage.getItem(LEVEL_KEY)||'easy'; if(!LEVELS[startLevel]) startLevel='easy'; }catch(_){}
+</script>
+<script src="engine.js"></script>
+<script>newGame(startLevel);</script>
+</body>
+</html>
